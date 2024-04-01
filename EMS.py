@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 import glob
 import re
+from io import StringIO
 import warnings
 
 from structure_io import from_rdmol, to_rdmol
@@ -14,9 +15,19 @@ from utils.periodic_table import Get_periodic_table
 
 class EMS(object):
 
-    def __init__(self, id, file, string=None):
+    def __init__(self, id, file, string=None, streamlit=False):
         self.id = id
+        if streamlit:
+            self.filename = file.name
+        else:
+            self.filename = file
+
         self.file = file
+
+        if streamlit:
+            self.stringfile = StringIO(file.getvalue().decode("utf-8"))
+        else:
+            self.stringfile = file
         self.type = None
         self.xyz = None
         self.conn = None
@@ -25,6 +36,7 @@ class EMS(object):
         self.atom_properties = {}
         self.pair_properties = {}
         self.flat = False
+        self.streamlit = streamlit
 
         if string:
             match string:
@@ -34,7 +46,7 @@ class EMS(object):
                     self.rdmol = Chem.MolFromSmarts(file)
 
         else:
-            ftype = file.split(".")[-1]
+            ftype = self.filename.split(".")[-1]
 
             match ftype:
                 case "sdf":
@@ -43,13 +55,22 @@ class EMS(object):
                         warnings.warn(
                             f"Warning: {self.id} - All Z coordinates are 0 - Flat flag set to True"
                         )
-                    for mol in Chem.SDMolSupplier(
-                        self.file, removeHs=False, sanitize=False
-                    ):
-                        if mol is not None:
-                            if mol.GetProp("_Name") is None:
-                                mol.SetProp("_Name", self.id)
-                            self.rdmol = mol
+                    if streamlit:
+                        for mol in Chem.ForwardSDMolSupplier(
+                            self.file, removeHs=False, sanitize=False
+                        ):
+                            if mol is not None:
+                                if mol.GetProp("_Name") is None:
+                                    mol.SetProp("_Name", self.id)
+                                self.rdmol = mol
+                    else:
+                        for mol in Chem.SDMolSupplier(
+                            self.file, removeHs=False, sanitize=False
+                        ):
+                            if mol is not None:
+                                if mol.GetProp("_Name") is None:
+                                    mol.SetProp("_Name", self.id)
+                                self.rdmol = mol
                 case "xyz":
                     self.rdmol = Chem.MolFromXYZFile(self.path)
 
@@ -75,7 +96,7 @@ class EMS(object):
         self.type, self.xyz, self.conn = from_rdmol(self.rdmol)
         self.path_topology, self.path_distance = self.get_graph_distance()
 
-        if self.file.split(".")[-2] == "nmredata":
+        if self.filename.split(".")[-2] == "nmredata":
             shift, shift_var, coupling, coupling_vars = self.nmr_read()
             self.atom_properties["shift"] = shift
             self.atom_properties["shift_var"] = shift_var
@@ -100,9 +121,8 @@ class EMS(object):
         )
 
     def check_z_ords(self):
-        with open(self.file, "r") as f:
-            lines = f.readlines()
-            for line in lines:
+        if self.streamlit:
+            for line in self.stringfile:
                 if re.match(r"^.{10}[^ ]+ [^ ]+ ([^ ]+) ", line):
                     z_coord = float(
                         line.split()[3]
@@ -111,48 +131,48 @@ class EMS(object):
                         return False
             return True
 
+        else:
+            with open(self.stringfile, "r") as f:
+                lines = f.readlines()
+                for line in lines:
+                    if re.match(r"^.{10}[^ ]+ [^ ]+ ([^ ]+) ", line):
+                        z_coord = float(
+                            line.split()[3]
+                        )  # Assuming the z coordinate is the fourth field
+                        if z_coord != 0:
+                            return False
+                return True
+
     def nmr_read(self):
-        # Input:
-        # 	file: filename
-        # 	atoms: number of atoms in molecule (read sdf part first)
-
-        # Returns:
-        # 	shift_array, array of chemical shifts (1D numpy array)
-        # 	shift_var, array of chemical shift variances (used in machine learning) (1D numpy array)
-        # 	coupling_array, array of coupling constants (2D numpy array)
-        # 	coupling_len, array of bond distance between atoms (2D numpy array)
-        # 	coupling_var, array of coupling constant variances (used in machine learning) (2D numpy array)
-
-        atoms = 0
-        with open(self.file, "r") as f:
-            for line in f:
+        if self.streamlit:
+            atoms = 0
+            for line in self.stringfile:
                 if len(line.split()) == 16:
                     atoms += 1
                 if "V2000" in line or len(line.split()) == 12:
                     chkatoms = int(line.split()[0])
 
-        # check for stupid size labelling issue
-        if atoms != chkatoms:
-            for i in range(1, len(str(chkatoms))):
-                if atoms == int(str(chkatoms)[:-i]):
-                    chkatoms = atoms
-                    break
+            # check for stupid size labelling issue
+            if atoms != chkatoms:
+                for i in range(1, len(str(chkatoms))):
+                    if atoms == int(str(chkatoms)[:-i]):
+                        chkatoms = atoms
+                        break
 
-        assert atoms == chkatoms
-        # Define empty arrays
-        shift_array = np.zeros(atoms, dtype=np.float64)
-        # Variance is used for machine learning
-        shift_var = np.zeros(atoms, dtype=np.float64)
-        coupling_array = np.zeros((atoms, atoms), dtype=np.float64)
-        coupling_len = np.zeros((atoms, atoms), dtype=np.int64)
-        # Variance is used for machine learning
-        coupling_var = np.zeros((atoms, atoms), dtype=np.float64)
+            assert atoms == chkatoms
+            # Define empty arrays
+            shift_array = np.zeros(atoms, dtype=np.float64)
+            # Variance is used for machine learning
+            shift_var = np.zeros(atoms, dtype=np.float64)
+            coupling_array = np.zeros((atoms, atoms), dtype=np.float64)
+            coupling_len = np.zeros((atoms, atoms), dtype=np.int64)
+            # Variance is used for machine learning
+            coupling_var = np.zeros((atoms, atoms), dtype=np.float64)
 
-        # Go through file looking for assignment sections
-        with open(self.file, "r") as f:
+            # Go through file looking for assignment sections
             shift_switch = False
             cpl_switch = False
-            for line in f:
+            for line in self.stringfile:
                 if "<NMREDATA_ASSIGNMENT>" in line:
                     shift_switch = True
                 if "<NMREDATA_J>" in line:
@@ -187,7 +207,74 @@ class EMS(object):
                     coupling_len[int(items[0])][int(items[2])] = length
                     coupling_len[int(items[2])][int(items[0])] = length
 
-        return shift_array, shift_var, coupling_array, coupling_var
+            return shift_array, shift_var, coupling_array, coupling_var
+
+        else:
+            atoms = 0
+            with open(self.stringfile, "r") as f:
+                for line in f:
+                    if len(line.split()) == 16:
+                        atoms += 1
+                    if "V2000" in line or len(line.split()) == 12:
+                        chkatoms = int(line.split()[0])
+
+            # check for stupid size labelling issue
+            if atoms != chkatoms:
+                for i in range(1, len(str(chkatoms))):
+                    if atoms == int(str(chkatoms)[:-i]):
+                        chkatoms = atoms
+                        break
+
+            assert atoms == chkatoms
+            # Define empty arrays
+            shift_array = np.zeros(atoms, dtype=np.float64)
+            # Variance is used for machine learning
+            shift_var = np.zeros(atoms, dtype=np.float64)
+            coupling_array = np.zeros((atoms, atoms), dtype=np.float64)
+            coupling_len = np.zeros((atoms, atoms), dtype=np.int64)
+            # Variance is used for machine learning
+            coupling_var = np.zeros((atoms, atoms), dtype=np.float64)
+
+            # Go through file looking for assignment sections
+            with open(self.stringfile, "r") as f:
+                shift_switch = False
+                cpl_switch = False
+                for line in f:
+                    if "<NMREDATA_ASSIGNMENT>" in line:
+                        shift_switch = True
+                    if "<NMREDATA_J>" in line:
+                        shift_switch = False
+                        cpl_switch = True
+                    # If shift assignment label found, process shift rows
+                    if shift_switch:
+                        # Shift assignment row looks like this
+                        #  0    , -33.56610000   , 8    , 0.00000000     \
+                        items = line.split()
+                        try:
+                            int(items[0])
+                        except:
+                            continue
+                        shift_array[int(items[0])] = float(items[2])
+                        shift_var[int(items[0])] = float(items[6])
+                    # If coupling assignment label found, process coupling rows
+                    if cpl_switch:
+                        # Coupling row looks like this
+                        #  0         , 4         , -0.08615310    , 3JON      , 0.00000000
+                        # ['0', ',', '1', ',', '-0.26456900', ',', '5JON', ',', '0.00000000']
+                        items = line.split()
+                        try:
+                            int(items[0])
+                        except:
+                            continue
+                        length = int(items[6].strip()[0])
+                        coupling_array[int(items[0])][int(items[2])] = float(items[4])
+                        coupling_array[int(items[2])][int(items[0])] = float(items[4])
+                        coupling_var[int(items[0])][int(items[2])] = float(items[8])
+                        coupling_var[int(items[2])][int(items[0])] = float(items[8])
+                        coupling_len[int(items[0])][int(items[2])] = length
+                        coupling_len[int(items[2])][int(items[0])] = length
+
+            return shift_array, shift_var, coupling_array, coupling_var
 
     def get_graph_distance(self):
         return Chem.GetDistanceMatrix(self.rdmol), Chem.Get3DDistanceMatrix(self.rdmol)
@@ -301,9 +388,3 @@ def make_pairs_df(ems_list, write=False, max_pathlen=6):
         pairs.to_pickle(f"{write}/pairs.pkl")
     else:
         return pairs
-
-
-def make_dfs(folder_path, id_index, outpath):
-    ems_list = parse_sdf_folder(folder_path, id_index)
-    make_atoms_df(ems_list, write=outpath)
-    make_pairs_df(ems_list, write=outpath)
