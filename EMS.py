@@ -15,7 +15,7 @@ from utils.periodic_table import Get_periodic_table
 
 class EMS(object):
 
-    def __init__(self, id, file, string=None, streamlit=False):
+    def __init__(self, id, file, string=None, read_nmr=False, streamlit=False):
         self.id = id
         if streamlit:
             self.filename = file.name
@@ -95,8 +95,9 @@ class EMS(object):
 
         self.type, self.xyz, self.conn = from_rdmol(self.rdmol)
         self.path_topology, self.path_distance = self.get_graph_distance()
+        self.get_coupling_types()
 
-        if self.filename.split(".")[-2] == "nmredata":
+        if self.filename.split(".")[-2] == "nmredata" and read_nmr:
             shift, shift_var, coupling, coupling_vars = self.nmr_read()
             self.atom_properties["shift"] = shift
             self.atom_properties["shift_var"] = shift_var
@@ -278,6 +279,43 @@ class EMS(object):
 
     def get_graph_distance(self):
         return Chem.GetDistanceMatrix(self.rdmol), Chem.Get3DDistanceMatrix(self.rdmol)
+
+    def get_coupling_types(self) -> None:
+        """
+        Function for generating all the coupling types for all atom-pair interactions, stores internally in pair_properties attributes.
+
+        :param aemol: Type, aemol class to generate coupling types for
+        :return: None
+        """
+        p_table = Get_periodic_table()
+
+        if self.path_topology is None:
+            self.path_topology, self.path_distance = self.get_graph_distance()
+
+        cpl_types = []
+        for t, type in enumerate(self.type):
+            tmp_types = []
+            for t2, type2 in enumerate(self.type):
+
+                if type > type2:
+                    targetflag = (
+                        str(int(self.path_topology[t][t2]))
+                        + "J"
+                        + p_table[type]
+                        + p_table[type2]
+                    )
+                else:
+                    targetflag = (
+                        str(int(self.path_topology[t][t2]))
+                        + "J"
+                        + p_table[type2]
+                        + p_table[type]
+                    )
+
+                tmp_types.append(targetflag)
+            cpl_types.append(tmp_types)
+
+        self.pair_properties["nmr_types"] = cpl_types
 
 
 def make_atoms_df(ems_list, write=False):
