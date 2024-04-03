@@ -29,6 +29,18 @@ def from_rdmol(rdmol):
     return type_array, xyz_array, conn_array
 
 
+def from_rdmol_test(rdmol):
+    type_array = np.zeros(rdmol.GetNumAtoms(), dtype=np.int32)
+    for i, atoms in enumerate(rdmol.GetAtoms()):
+        type_array[i] = atoms.GetAtomicNum()
+    if rdmol.GetNumConformers() < 1:
+        AllChem.Compute2DCoords(rdmol)
+    xyz_array = rdmol.GetConformer().GetPositions()
+    conn_array = rdmol.GetAdjacencyMatrix(useBO=True)
+
+    return type_array, xyz_array, conn_array
+
+
 def to_rdmol(structure, sanitize=True):
     # Create an RDKit molecule object
     periodic_table = Get_periodic_table()

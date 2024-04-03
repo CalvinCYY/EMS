@@ -15,16 +15,19 @@ from utils.periodic_table import Get_periodic_table
 
 class EMS(object):
 
-    def __init__(self, id, file, string=None, read_nmr=False, streamlit=False):
-        self.id = id
-        if streamlit:
+    def __init__(self, file, id=None, string=None, read_nmr=False, streamlit=False):
+        if string:
+            self.id = file
+        else:
+            self.id = id
+        if streamlit and not string:
             self.filename = file.name
         else:
             self.filename = file
 
         self.file = file
 
-        if streamlit:
+        if streamlit and not string:
             self.stringfile = StringIO(file.getvalue().decode("utf-8"))
         else:
             self.stringfile = file
@@ -42,6 +45,8 @@ class EMS(object):
             match string:
                 case "smi":
                     self.rdmol = Chem.MolFromSmiles(file)
+                    self.rdmol = Chem.AddHs(self.rdmol)
+                    AllChem.EmbedMolecule(self.rdmol)
                 case "smarts":
                     self.rdmol = Chem.MolFromSmarts(file)
 
@@ -97,13 +102,17 @@ class EMS(object):
         self.path_topology, self.path_distance = self.get_graph_distance()
         self.get_coupling_types()
 
-        if self.filename.split(".")[-2] == "nmredata" and read_nmr:
-            shift, shift_var, coupling, coupling_vars = self.nmr_read()
-            self.atom_properties["shift"] = shift
-            self.atom_properties["shift_var"] = shift_var
-            self.pair_properties["coupling"] = coupling
-            self.pair_properties["coupling_var"] = coupling_vars
-            assert len(self.atom_properties["shift"]) == len(self.type)
+        try:
+            nmr_file_type = self.filename.split(".")[-2]
+            if nmr_file_type == "nmredata" and read_nmr:
+                shift, shift_var, coupling, coupling_vars = self.nmr_read()
+                self.atom_properties["shift"] = shift
+                self.atom_properties["shift_var"] = shift_var
+                self.pair_properties["coupling"] = coupling
+                self.pair_properties["coupling_var"] = coupling_vars
+                assert len(self.atom_properties["shift"]) == len(self.type)
+        except:
+            print("No NMR data detected")
 
     def __str__(self):
         print(f"EMS({self.id})")
