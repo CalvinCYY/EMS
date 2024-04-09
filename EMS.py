@@ -326,6 +326,9 @@ class EMS(object):
 
         self.pair_properties["nmr_types"] = cpl_types
 
+    def convert_to_rdmol(self):
+        self.rdmol = to_rdmol(self)
+
 
 def make_atoms_df(ems_list, write=False):
     p_table = Get_periodic_table()

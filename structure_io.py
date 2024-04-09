@@ -41,19 +41,19 @@ def from_rdmol_test(rdmol):
     return type_array, xyz_array, conn_array
 
 
-def to_rdmol(structure, sanitize=True):
+def to_rdmol(ems_mol, sanitize=True):
     # Create an RDKit molecule object
     periodic_table = Get_periodic_table()
     rdmol = Chem.RWMol()
 
     # Add the atoms to the molecule
-    for atom in structure["types"]:
+    for atom in ems_mol.type:
         symbol = periodic_table[int(atom)]
         rdmol.AddAtom(Chem.Atom(symbol))
 
         # Add the bonds to the molecule
     visited = []
-    for i, bond_order_array in enumerate(structure["conn"]):
+    for i, bond_order_array in enumerate(ems_mol.conn):
         for j, bond_order in enumerate(bond_order_array):
             if j in visited:
                 continue
@@ -65,7 +65,7 @@ def to_rdmol(structure, sanitize=True):
 
         # Add the coordinates to the atoms
     conformer = Chem.Conformer()
-    for i, coord in enumerate(structure["xyz"]):
+    for i, coord in enumerate(ems_mol.xyz):
         conformer.SetAtomPosition(i, coord)
     rdmol.AddConformer(conformer)
 
